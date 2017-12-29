@@ -1,0 +1,195 @@
+---
+title: "Pratical Machine Learning Course Project"
+author: "Fabio Araujo"
+date: "28 de dezembro de 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###**1. Abstract**
+  This document is the final report of the Peer-graded Assignment from the Pratical Machine Learning. 
+  The objective of this project is to predict the manner in which a group did  the excercice using the data collected by devices used in their personal activity. 
+  The model to predict was performed using the "class" variable and other in the training set. 
+  At the final we choose the Random Forest Model because its better 0.9973 accuracy. The final result of the 20 different test cases follow bellow:  
+B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B
+
+Especial thanks to:
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+###**2. Background**
+  Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz3xsbS5bVX
+
+
+###**3. Data loading, cleaning, partitioning**
+####**a) Dataset**
+  The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+  The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source:
+http://groupware.les.inf.puc-rio.br/har. 
+
+
+####**b) Required packages**
+```{r, echo=TRUE, message=FALSE}
+library(ggplot2);library(rpart);library(rpart.plot);library(caret);
+library(randomForest);library(rattle);library(e1071); library(gbm);
+library(corrplot)
+
+```
+
+####**c) Set seed for reproducibility**
+```{r, echo=TRUE, message=FALSE}
+  
+set.seed(999)
+
+```
+
+####**d) Data loading**
+```{r, echo=TRUE, message=FALSE}
+# Url path
+urltrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urltest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# If the training file do not exist in home dir, download it
+if (!file.exists("./pml-training.csv")) {
+      download.file(urltrain, destfile = "./pml-training.csv")
+}
+# If the testing file do not exist in home dir, download it
+if (!file.exists("./pml-testing.csv")) {
+      download.file(urltest, destfile = "./pml-testing.csv")
+}
+# Load data into R
+trainRData <- read.csv("./pml-training.csv")
+testRData <- read.csv("./pml-testing.csv")
+
+dim(trainRData)
+dim(testRData)
+
+```
+
+####**e) Data cleaning**
+```{r, echo=TRUE, message=FALSE}
+nzv <- nearZeroVar(trainRData, saveMetrics = T)
+trainCData <- trainRData[, !nzv$nzv] 
+testCData <- testRData[, !nzv$nzv]
+
+dim(trainCData)
+dim(testCData)
+
+# remove variables that are mostly NA
+onlyNA <- sapply(trainCData, function(x) mean(is.na(x))) > 0.95
+trainCData <- trainCData[, onlyNA==F]
+testCData <- testCData[, onlyNA==F]
+dim(trainCData)
+dim(testCData)
+
+
+# Remove identification only variables (columns 1 to 5)
+trainCData <- trainCData[,-(1:5)]
+testCData <- testCData[,-(1:5)]
+dim(trainCData)
+dim(testCData)
+
+```
+####**f) Correlation Analysis**
+Analysis from correlation among variables with PCA propouse.
+```{r, echo=TRUE, message=FALSE, fig.align='center', fig.height=8, fig.width=8 }
+MxCor <- cor(trainCData[, -54])
+corrplot(MxCor, order = "hclust", method = "color", type = "lower", 
+         tl.cex = 0.75, tl.col = rgb(0, 0, 0))
+
+```
+High correlated variables are shown in dark blue. But there are quite few correlations. So the PCA will not be applied. 
+
+####**g) Data partitioning**
+```{r, echo=TRUE, message=FALSE}
+# Split the clean training data to 70% training and 30% testing set
+inTrain <- createDataPartition(trainCData$classe, p = 0.70, list = F)
+training <- trainCData[inTrain, ]
+testing <- trainCData[-inTrain, ]
+
+```
+
+###**4. Building the Prediction Model **
+
+####**a) Bulding Decision Tree**
+```{r, echo=TRUE, message=FALSE}
+# Decision Tree model
+modelDT <- rpart(as.factor(classe) ~ ., data = training, method = "class")
+
+```
+
+```{r, echo=TRUE, message=FALSE}
+# Prediction on testing dataset
+predictDT <- predict(modelDT, testing, type = "class")
+# Confusion matrix to see the accuracy
+cM2 <- confusionMatrix(predictDT, testing$classe) 
+
+
+# Plot matrix results
+plot(cM2$table, col = cM2$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+                  round(cM2$overall['Accuracy'], 4)))
+
+```
+The accuracy of the model is 73,85% and the estimated out-of-sample error is 26,15%
+
+
+
+####**b) Generalized Boosted Model**
+  
+```{r, echo=TRUE, message=FALSE}
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=training, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modFitGBM$finalModel
+
+# prediction on Test dataset
+predictGBM <- predict(modFitGBM, newdata=testing)
+confMatGBM <- confusionMatrix(predictGBM, testing$classe)
+confMatGBM
+
+
+# plot matrix results
+plot(confMatGBM$table, col = confMatGBM$byClass, 
+     main = paste("GBM - Accuracy =", round(confMatGBM$overall['Accuracy'], 4)))
+
+```
+The accuracy of the model is 98.37% and the estimated out-of-sample error is 1.63%
+
+####**c) Random Forest Model**
+```{r, echo=TRUE, message=FALSE}
+# Random Forest Model
+RFM <- randomForest(as.factor(classe) ~ ., data = training)
+# Prediction on testing dataset
+predictRFM <- predict(RFM, testing, type = "class")
+# Confusion matrix to see the accuracy 
+cM <- confusionMatrix(predictRFM, testing$classe)
+cM
+
+# plot matrix results
+plot(cM$table, col = cM$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(cM$overall['Accuracy'], 4)))
+
+```
+The accuracy of the model is 99.73% and the estimated out-of-sample error is 0.270%
+
+###**5. Conclusion**
+We choose Random Forest Model for our prediction because his Accuracy is the best 0.9973 among the three models. 
+
+The expected out-of-sample error from our choice is: 
+100 - 0.9973 = 0.270%
+
+
+
+```{r, echo=TRUE, message=FALSE}
+# predict the `class` of the tesdDFclean data
+predict(RFM, newdata = testCData)
+```
